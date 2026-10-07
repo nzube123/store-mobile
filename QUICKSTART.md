@@ -53,7 +53,7 @@ cat << 'EOF'
 
     • iOS Simulator (macOS): Press 'i'
     • Android Emulator: Press 'a'
-    • Expo Go app: Scan QR code with Expo Go (Install from App Store first)
+    • Install an EAS preview/development build to run the native app
     • Web preview: Press 'w' (limited features)
 
 6️⃣  TEST THE APP
@@ -111,8 +111,8 @@ cat << 'EOF'
 🌐 API INTEGRATION
 
     GET  /api/products           Fetch live catalogue
-    GET  /api/auth/me            Check if signed in
-    GET  /api/auth/google        Start OAuth flow (browser)
+    POST /api/auth/google/mobile Exchange Google ID token for app token
+    GET  /api/auth/me            Restore signed-in account
     POST /api/orders/checkout    Create order & get payment URL
 
     For full details: see API_REFERENCE.md
@@ -148,8 +148,9 @@ cat << 'EOF'
     → Run: pnpm typecheck
 
     Issue: "Google sign-in fails"
-    → Check API's OAuth redirect URIs
-    → Ensure cookies are enabled in browser
+    → Set the public Google client IDs in .env
+    → Check Android package name and signing-certificate SHA-1 in Google Cloud
+    → Use a native development/production build, not Expo Go
 
     Issue: "Paystack link doesn't open"
     → Verify API returns valid HTTPS URL

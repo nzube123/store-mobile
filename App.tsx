@@ -2,7 +2,10 @@ import { StatusBar } from "expo-status-bar";
 import * as WebBrowser from "expo-web-browser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AppState,
+  GoogleSignin,
+  isSuccessResponse,
+} from "@react-native-google-signin/google-signin";
+import {
   ActivityIndicator,
   Alert,
   FlatList,
@@ -20,13 +23,25 @@ import {
   View,
 } from "react-native";
 import {
-  API_URL,
+  GOOGLE_IOS_CLIENT_ID,
+  GOOGLE_WEB_CLIENT_ID,
+  clearAuthentication,
+  exchangeGoogleIdToken,
   getCurrentUser,
   getProducts,
+  setAuthenticationExpiredHandler,
   startCheckout,
   type Product,
   type StoreUser,
 } from "./src/api";
+
+if (GOOGLE_WEB_CLIENT_ID) {
+  GoogleSignin.configure({
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    ...(GOOGLE_IOS_CLIENT_ID ? { iosClientId: GOOGLE_IOS_CLIENT_ID } : {}),
+    offlineAccess: false,
+  });
+}
 
 type CartItem = { product: Product; quantity: number };
 type Screen = "shop" | "bag" | "account" | "checkout";
@@ -44,40 +59,6 @@ const colors = {
 
 function money(value: number): string {
   return `₦${value.toLocaleString("en-NG")}`;
-}
-
-function waitForAppReturn() {
-  let resolveWait!: () => void;
-  let rejectWait!: (error: Error) => void;
-  let settled = false;
-  let leftApp = false;
-  let subscription: ReturnType<typeof AppState.addEventListener> | undefined;
-  let timeout: ReturnType<typeof setTimeout>;
-
-  const finish = (error?: Error) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timeout);
-    subscription?.remove();
-    if (error) rejectWait(error);
-    else resolveWait();
-  };
-
-  const promise = new Promise<void>((resolve, reject) => {
-    resolveWait = resolve;
-    rejectWait = reject;
-  });
-
-  subscription = AppState.addEventListener("change", (state) => {
-    if (state !== "active") leftApp = true;
-    else if (leftApp) finish();
-  });
-  timeout = setTimeout(
-    () => finish(new Error("Google sign-in timed out. Return to the app and try again.")),
-    5 * 60 * 1000,
-  );
-
-  return { promise, cancel: () => finish() };
 }
 
 function getPaymentUrl(result: Awaited<ReturnType<typeof startCheckout>>): string | undefined {
@@ -166,10 +147,24 @@ export default function App() {
       setUser(userResult.value);
       if (userResult.value?.name) setCustomerName(userResult.value.name);
       if (userResult.value?.email) setCustomerEmail(userResult.value.email);
+    } else {
+      setError(
+        userResult.reason instanceof Error
+          ? userResult.reason.message
+          : "Could not restore your account. Please try again.",
+      );
     }
     setLoading(false);
     setRefreshing(false);
   }
+
+  useEffect(() => {
+    setAuthenticationExpiredHandler(() => {
+      setUser(null);
+      setNotice("Your session expired. Please sign in again.");
+    });
+    return () => setAuthenticationExpiredHandler(undefined);
+  }, []);
 
   useEffect(() => {
     void loadStore();
@@ -230,35 +225,75 @@ export default function App() {
     setAuthBusy(true);
     setError("");
     setNotice("");
-    const appReturn = Platform.OS === "android" ? waitForAppReturn() : undefined;
     try {
-      const browserResult = await WebBrowser.openBrowserAsync(`${API_URL}/api/auth/google`);
-      if (browserResult.type === "cancel") {
-        appReturn?.cancel();
+      if (
+        !GOOGLE_WEB_CLIENT_ID ||
+        (Platform.OS === "ios" && !GOOGLE_IOS_CLIENT_ID)
+      ) {
+        throw new Error(
+          "Google sign-in is not configured. Set the public Google OAuth client IDs and rebuild the app.",
+        );
+      }
+      if (Platform.OS === "android") {
+        const hasPlayServices = await GoogleSignin.hasPlayServices({
+          showPlayServicesUpdateDialog: true,
+        });
+        if (!hasPlayServices) {
+          throw new Error("Google Play Services are required to sign in.");
+        }
+      }
+
+      const googleResponse = await GoogleSignin.signIn();
+      if (!isSuccessResponse(googleResponse)) {
         setNotice("Google sign-in was cancelled.");
         return;
       }
-      if (browserResult.type === "locked") {
-        throw new Error("The browser could not open Google sign-in.");
+      const idToken = googleResponse.data.idToken;
+      if (!idToken) {
+        throw new Error("Google sign-in did not return an ID token. Please try again.");
       }
-      if (Platform.OS === "android" && browserResult.type === "opened") {
-        await appReturn?.promise;
-      }
-      const signedInUser = await getCurrentUser();
+      const signedInUser = await exchangeGoogleIdToken(idToken);
       setUser(signedInUser);
-      if (signedInUser) {
-        setCustomerName(signedInUser.name ?? "");
-        setCustomerEmail(signedInUser.email ?? "");
-        setNotice(`Welcome${signedInUser.name ? `, ${signedInUser.name}` : " back"}!`);
-      } else {
-        setError(
-          "Google sign-in returned to the app, but the API session is unavailable here. The current API uses a browser-only session cookie; mobile sign-in needs a native redirect and token exchange.",
-        );
-      }
+      setCustomerName(signedInUser.name ?? "");
+      setCustomerEmail(signedInUser.email ?? "");
+      setNotice(`Welcome${signedInUser.name ? `, ${signedInUser.name}` : " back"}!`);
     } catch (reason) {
-      appReturn?.cancel();
       setError(
         reason instanceof Error ? reason.message : "Google sign-in could not be started.",
+      );
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function signOut() {
+    setAuthBusy(true);
+    setError("");
+    setNotice("");
+    setUser(null);
+    setCustomerName("");
+    setCustomerEmail("");
+    setScreen("account");
+    try {
+      await clearAuthentication();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? `Your local account was cleared, but secure credentials could not be removed: ${reason.message}`
+          : "Your local account was cleared, but secure credentials could not be removed.",
+      );
+      setAuthBusy(false);
+      return;
+    }
+
+    try {
+      await GoogleSignin.signOut();
+      setNotice("You have been signed out.");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? `You are signed out of Cedar & Loom, but Google sign-out could not be completed: ${reason.message}`
+          : "You are signed out of Cedar & Loom, but Google sign-out could not be completed.",
       );
     } finally {
       setAuthBusy(false);
@@ -607,9 +642,23 @@ export default function App() {
               "Sign in to keep your order details together and make checkout a little easier."}
           </Text>
           {user ? (
-            <View style={styles.signedInPill}>
-              <Text style={styles.signedInText}>✓  Signed in with Google</Text>
-            </View>
+            <>
+              <View style={styles.signedInPill}>
+                <Text style={styles.signedInText}>✓  Signed in with Google</Text>
+              </View>
+              <Pressable
+                onPress={() => void signOut()}
+                disabled={authBusy}
+                style={[styles.signOutButton, authBusy && styles.buttonDisabled]}
+                accessibilityRole="button"
+              >
+                {authBusy ? (
+                  <ActivityIndicator color={colors.ink} />
+                ) : (
+                  <Text style={styles.signOutButtonText}>Sign out</Text>
+                )}
+              </Pressable>
+            </>
           ) : (
             <Pressable
               onPress={() => void signInWithGoogle()}
@@ -638,9 +687,8 @@ export default function App() {
           </View>
         </View>
         <Text style={styles.accountFootnote}>
-          Google sign-in opens in your secure browser. We never ask for or store your
-          Google password. If the app cannot read your session after sign-in, the API
-          needs to add a native token exchange flow.
+          Sign in securely with Google. Your app authentication tokens are stored
+          encrypted on this device.
         </Text>
       </ScrollView>
     );
@@ -1063,6 +1111,8 @@ const styles = StyleSheet.create({
   googleButtonText: { color: colors.ink, fontSize: 12, fontWeight: "500" },
   signedInPill: { marginTop: 18, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.paleGreen },
   signedInText: { color: colors.green, fontSize: 10, fontWeight: "600" },
+  signOutButton: { minHeight: 43, justifyContent: "center", paddingHorizontal: 18, marginTop: 10 },
+  signOutButtonText: { color: colors.muted, fontSize: 11, fontWeight: "600" },
   infoCard: { flexDirection: "row", backgroundColor: "#eeece3", padding: 15, marginTop: 15 },
   infoIcon: { color: colors.orange, fontSize: 21, marginRight: 11 },
   infoTextWrap: { flex: 1 },

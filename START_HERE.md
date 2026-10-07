@@ -21,7 +21,7 @@ pnpm start
 **Output:**
 ```
 › Metro waiting on exp://192.168.1.100:8081
-› Scan the QR code above with Expo Go
+› Install a custom native build to run the app
 ```
 
 ## 📱 Run on Device/Simulator
@@ -30,7 +30,7 @@ After `pnpm start`, press:
 - **`i`** for iOS Simulator
 - **`a`** for Android Emulator
 - **`w`** for Web preview
-- **Scan QR** with Expo Go app (fastest option)
+- **Install a custom native build**; Expo Go does not include the Google Sign-In module
 
 ## 📚 Documentation
 
@@ -49,7 +49,7 @@ After `pnpm start`, press:
 ✅ **Live catalogue** from API  
 ✅ **Search & filters**  
 ✅ **Shopping bag**  
-✅ **Google sign-in** (browser-based)  
+✅ **Native Google sign-in** with secure API token exchange
 ✅ **Secure checkout** with Paystack  
 ✅ **Email receipts** via Mailgun (backend)  
 ✅ **Full TypeScript** support  
@@ -74,8 +74,8 @@ The app connects to: `https://store-app-exqx.onrender.com`
 
 **Key endpoints:**
 - `GET /api/products` — Live catalogue
-- `GET /api/auth/me` — Check sign-in status
-- `GET /api/auth/google` — Google OAuth
+- `POST /api/auth/google/mobile` — Exchange Google ID token for app credentials
+- `GET /api/auth/me` — Restore authenticated user
 - `POST /api/orders/checkout` — Create order + get payment link
 
 **Paystack & Mailgun:** Handled entirely by backend. Never on the mobile app.
@@ -123,7 +123,7 @@ For more, see [SETUP.md](SETUP.md) → **Troubleshooting**.
 - Continue to checkout
 
 ### 3. **Account Screen**
-- Google sign-in (browser opens)
+- Native Google sign-in
 - Display user info when signed in
 - Security info about Paystack
 
@@ -138,7 +138,7 @@ For more, see [SETUP.md](SETUP.md) → **Troubleshooting**.
 - **Pull to refresh** on Shop or Bag screens to update
 - **Search is live** — starts filtering as you type
 - **Tap product image** to see full details
-- **Browser opens for OAuth/payments** — return to app when done
+- **Paystack opens in a browser** — return to app when done
 - **Cart persists** while you shop (until you place order)
 
 ## 🎓 Learning the Code
@@ -147,7 +147,7 @@ For more, see [SETUP.md](SETUP.md) → **Troubleshooting**.
 - All 4 screens are in one file (~920 lines)
 - Uses React hooks (useState, useEffect, useMemo)
 - StyleSheet for all styling
-- No external libraries except Expo
+- Expo modules plus native Google Sign-In
 
 **API calls:** [src/api.ts](src/api.ts)
 - Type-safe fetch wrapper
@@ -167,7 +167,7 @@ For more, see [SETUP.md](SETUP.md) → **Troubleshooting**.
 pnpm start
 ```
 
-Then scan the QR code with **Expo Go** or press `i`/`a` for simulator.
+Install an EAS preview/development build to use the native app and Google sign-in.
 
 **Happy building!** 🚀
 

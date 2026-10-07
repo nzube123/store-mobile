@@ -4,13 +4,13 @@ A React Native storefront built with **Expo** and **TypeScript**, integrated wit
 
 ## Features
 
-✓ **Live catalogue** with search & category filtering  
-✓ **Google OAuth sign-in** (browser-based, server-managed)  
-✓ **Shopping bag** with quantity controls  
-✓ **Secure checkout** powered by Paystack (via API)  
-✓ **Email receipts** sent by Mailgun (server-side)  
-✓ **TypeScript** for type safety  
-✓ **Accessible UI** built with React Native  
+✓ **Live catalogue** with search & category filtering
+✓ **Native Google sign-in** with secure API token exchange
+✓ **Shopping bag** with quantity controls
+✓ **Secure checkout** powered by Paystack (via API)
+✓ **Email receipts** sent by Mailgun (server-side)
+✓ **TypeScript** for type safety
+✓ **Accessible UI** built with React Native
 
 ## Quick Start
 
@@ -18,7 +18,8 @@ A React Native storefront built with **Expo** and **TypeScript**, integrated wit
 
 - **Node.js** 18+
 - **pnpm** (or npm/yarn)
-- A physical device or emulator (Android/iOS) to run the app
+- A physical device or emulator (Android/iOS) and an Expo development build;
+  native Google Sign-In is not available in Expo Go
 
 ### Install & Run
 
@@ -28,8 +29,7 @@ cp .env.example .env
 pnpm start
 ```
 
-Then:
-- Press `i` for iOS, `a` for Android, or `w` for web (Expo Go required for device testing)
+Then create a development build before testing native Google Sign-In.
 
 ### Environment Variables
 
@@ -37,9 +37,12 @@ Create a `.env` file at the project root:
 
 ```env
 EXPO_PUBLIC_API_URL=https://store-app-exqx.onrender.com
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=your-ios-client-id.apps.googleusercontent.com
 ```
 
-Replace the URL if using a local or alternative API instance.
+Replace the API URL if using another environment. Google client IDs are public
+OAuth identifiers, not secrets. Do not add a Google client secret to the app.
 
 ## Architecture
 
@@ -50,13 +53,17 @@ The mobile app handles:
 - **Cart management**: add, quantity, remove
 - **Account UI**: sign-in prompt, profile display
 - **Checkout form**: name, email, address collection
-- **Deep linking**: opens Google OAuth and Paystack URLs in the device browser
+- **Native authentication**: Google Sign-In returns an ID token, exchanged with
+  the API for app credentials
+- **Secure credentials**: Expo SecureStore persists app access and refresh tokens
+- **Checkout**: opens Paystack URLs in the device browser
 
 ### Store API
 
 The API handles:
 - **Product catalogue**: `GET /api/products`
-- **Authentication**: Google OAuth flow, session/cookie management
+- **Authentication**: `POST /api/auth/google/mobile` exchanges the Google ID
+  token for application credentials; protected requests use Bearer tokens
 - **Cart & checkout**: `POST /api/orders/checkout` creates orders and returns Paystack authorization URLs
 - **Payment**: Paystack integration (secret keys stay on server)
 - **Receipts**: Mailgun sends order confirmations
@@ -76,30 +83,20 @@ eas build --platform android --profile production
 
 Or use Expo's build cloud to generate app store binaries (APK/IPA).
 
-### Configuration
+### Google OAuth Configuration
 
-Before building, update `app.json`:
+The app uses native Google Sign-In with the existing scheme `cedarloom`,
+Android package `com.cedarandloom.store`, and iOS bundle ID
+`com.cedarandloom.store`. Supply the public Google web and iOS client IDs as
+`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` and `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` in
+the local environment and EAS build environment. The app config derives the
+iOS URL scheme from the iOS client ID.
 
-```json
-{
-  "expo": {
-    "name": "Cedar & Loom",
-    "slug": "cedar-and-loom",
-    "scheme": "cedarloom",
-    "plugins": [
-      "expo-web-browser"
-    ]
-  }
-}
-```
-
-Google must continue to redirect to the server callback:
-`https://store-app-exqx.onrender.com/api/auth/google/callback`.
-
-For native sign-in, the API must then redirect to `cedarloom://auth` with a
-short-lived one-time code and expose a code-exchange endpoint. The current API
-does not provide that native flow, so a browser sign-in may not create a session
-available to the app.
+Create an Android OAuth client in Google Cloud Console for package
+`com.cedarandloom.store` and every signing certificate SHA-1 used by local,
+EAS, and Google Play builds. A client secret is not needed by the app and must
+never be configured as an Expo public variable. Rebuild the native app after
+changing OAuth IDs or native configuration.
 
 ### App Store Submission
 
@@ -118,8 +115,9 @@ available to the app.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/products` | Fetch catalogue |
-| GET | `/api/auth/me` | Get current user |
-| GET | `/api/auth/google` | Start Google OAuth (browser) |
+| POST | `/api/auth/google/mobile` | Exchange Google ID token for app credentials |
+| POST | `/api/auth/refresh` | Refresh app access token when supported |
+| GET | `/api/auth/me` | Get current user using Bearer token |
 | POST | `/api/orders/checkout` | Create order & get Paystack link |
 
 ### Checkout Request Body
@@ -161,8 +159,9 @@ Example:
 - On mobile, ensure device is on the same network (for local IPs)
 
 ### "Google sign-in not working"
-- The live API redirects Google to its web callback and sets a browser-only `cedar.sid` cookie.
-- The native app cannot reliably read that browser cookie. The API needs to redirect to `cedarloom://auth` with a one-time code and provide a native token-exchange endpoint.
+- Confirm the web client ID and iOS client ID are set as public environment variables.
+- Confirm the Android OAuth client uses package `com.cedarandloom.store` and the SHA-1 fingerprint of the installed build's signing certificate.
+- Use a development or production build; native Google Sign-In does not work in Expo Go.
 
 ### "Paystack link doesn't open"
 - Verify the API returns a valid HTTPS URL
@@ -222,11 +221,11 @@ All styles are defined in `App.tsx` using `StyleSheet` for performance.
 
 ## Testing
 
-The app can be tested in:
-1. **Expo Go** (quick preview on device)
-2. **Android Emulator** (Android Studio)
-3. **iOS Simulator** (Xcode on macOS)
-4. **Web** via `pnpm web` (limited feature set)
+Native Google Sign-In requires a custom development/production build; Expo Go
+does not include the required native module. Supported targets include:
+1. **Android Emulator** (Android Studio)
+2. **iOS Simulator** (Xcode on macOS)
+3. **Web** via `pnpm web` (limited feature set)
 
 ## License
 

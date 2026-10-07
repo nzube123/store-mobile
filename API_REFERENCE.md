@@ -7,7 +7,8 @@ Base URL: `https://store-app-exqx.onrender.com` (or custom via `EXPO_PUBLIC_API_
 ### GET /api/auth/me
 **No parameters**
 
-Returns the currently authenticated user (from session cookie), or `user: null` if not signed in.
+Returns the current user for the Bearer access token, or `user: null` if the
+request is unauthenticated.
 
 **Response:**
 ```json
@@ -45,37 +46,31 @@ if (user) {
 }
 ```
 
----
+### POST /api/auth/google/mobile
 
-### GET /api/auth/google
-**No parameters**
+Exchanges a Google ID token obtained through native Google Sign-In for the
+application's credentials.
 
-Initiates Google OAuth flow. Returns a 302 redirect to Google's OAuth consent screen.
-
-The mobile app opens this URL in the device's browser. The live API redirects Google back to its web callback (`/api/auth/google/callback`) and sets an `HttpOnly`, `Secure` session cookie (`cedar.sid`). The cookie belongs to the browser; React Native's `fetch` session is separate, so `/api/auth/me` may still return `user: null` after successful browser sign-in.
-
-**Native sign-in requirement:** the API needs to redirect from its Google callback to the app's registered deep link with a short-lived, one-time authorization code. The app must exchange that code over HTTPS for a native session/token. The current API does not expose a mobile exchange endpoint.
-
-On Android, opening the browser returns control to JavaScript as soon as the
-custom tab opens, not when the user finishes sign-in. The app waits for the
-user to return before checking the session; a missing session then indicates
-the API's native-token limitation above, not necessarily a failed Google login.
-
-**Code:**
-```typescript
-import * as WebBrowser from 'expo-web-browser';
-import { API_URL, getCurrentUser } from './src/api';
-
-async function signInWithGoogle() {
-  await WebBrowser.openBrowserAsync(`${API_URL}/api/auth/google`);
-  const user = await getCurrentUser();
-  if (user) {
-    console.log(`Welcome, ${user.name}!`);
-  } else {
-    console.error('The API mobile token-exchange flow is not available.');
-  }
+**Request:**
+```json
+{
+  "idToken": "GOOGLE_ID_TOKEN"
 }
 ```
+
+The response must include an `accessToken` (or `access_token`) and may include
+a `refreshToken` (or `refresh_token`) and `user` object. The app sends the
+application access token as `Authorization: Bearer <accessToken>` and persists
+tokens using Expo SecureStore.
+
+### POST /api/auth/refresh
+
+When the API provides a refresh token, the app sends it in a JSON
+`refreshToken` field after an authenticated request returns HTTP 401. The API
+must return a new access token and may return a rotated refresh token. If
+refresh fails, stored credentials are deleted and the user is signed out.
+
+---
 
 ---
 
@@ -307,20 +302,10 @@ The app should respect these limits and show a user-friendly message if 429 (Too
 
 ---
 
-## CORS & Credentials
+## Authentication headers
 
-The app sends requests with:
-```
-credentials: "include"
-```
-
-This allows the API to read/write httpOnly session cookies set during OAuth.
-
-**Required CORS headers from API:**
-```
-access-control-allow-credentials: true
-access-control-allow-origin: <app-origin>
-```
+The React Native API client omits browser credentials/cookies. Authenticated
+requests use `Authorization: Bearer <accessToken>`.
 
 ---
 
